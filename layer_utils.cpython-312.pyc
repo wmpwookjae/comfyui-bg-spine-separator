@@ -1,0 +1,34 @@
+import numpy as np
+from data.types import ObjectCandidate
+
+
+def suggest_name(obj: ObjectCandidate, img_np: np.ndarray = None) -> str:
+    """
+    오브젝트 형태/색상/위치 기반으로 이름 후보를 반환.
+    Phase 1: category가 "unknown"이면 제너릭 이름 반환.
+    Phase 2: category 필드를 활용해 "tree", "lamp", "sign" 등 반환.
+    Phase 3: CLIP/BLIP 기반 카테고리 추론 연동.
+    """
+    if obj.category and obj.category != "unknown":
+        return f"obj_{obj.category}"
+    idx = obj.id.split("_")[-1]  # "obj_001" → "001"
+    return f"object_{idx}"
+
+
+def make_layer_filename(obj_id: str, obj_name: str, suffix: str = "") -> str:
+    """
+    레이어 파일명 생성. 규칙: "{id}_{name}{suffix}.png"
+    예: obj_001_tree_main.png / obj_001_tree_main_mask.png
+    """
+    base = f"{obj_id}_{obj_name}"
+    if suffix:
+        base = f"{base}_{suffix}"
+    return f"{base}.png"
+
+
+def make_part_filename(part_id: str, part_name: str) -> str:
+    """
+    파츠 파일명 생성. 규칙: "{part_id}_{part_name}.png"
+    예: obj_001_part_01_tree_crown.png
+    """
+    return f"{part_id}_{part_name}.png"

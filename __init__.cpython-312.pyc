@@ -1,0 +1,73 @@
+import cv2
+import numpy as np
+from typing import List
+from backends.base_segmenter import BaseSegmenter
+from data.types import ObjectCandidate
+
+
+class SimpleSegmenter(BaseSegmenter):
+    """
+    MVP용 단순 segmenter.
+    GrabCut + saliency + connected components 기반.
+    SAM 없이도 작동하는 최소 구현.
+    - prompt_hint: Phase 1에서는 무시. Phase 3(Grounded SAM)에서 활성화.
+    - deterministic: seed 의존 없음. 동일 입력 → 동일 출력 보장.
+    """
+
+    def load_model(self, **kwargs):
+        pass  # 외부 모델 불필요
+
+    def segment(
+        self,
+        image: np.ndarray,
+        prompt_hint: str = "",      # Phase 1: 무시. Phase 3에서 Grounded SAM으로 활성화.
+        max_objects: int = 8,
+        min_area_ratio: float = 0.02,
+    ) -> List[ObjectCandidate]:
+        h, w = image.shape[:2]
+        min_area = int(h * w * min_area_ratio)
+
+        # 1. Saliency map 생성
+        saliency = cv2.saliency.StaticSaliencyFineGrained_create()
+        success, saliency_map = saliency.computeSaliency(image)
+        if not success:
+            print("[SimpleSegmenter] saliency 실패. 빈 결과 반환.")
+            return []
+        saliency_map = (saliency_map * 255).astype(np.uint8)
+
+        # 2. Threshold + connected components
+        _, binary = cv2.threshold(saliency_map, 128, 255, cv2.THRESH_BINARY)
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary)
+
+        candidates = []
+        for i in range(1, num_labels):  # 0은 배경
+            area = stats[i, cv2.CC_STAT_AREA]
+            if area < min_area:
+                continue
+
+            x = stats[i, cv2.CC_STAT_LEFT]
+            y = stats[i, cv2.CC_STAT_TOP]
+            bw = stats[i, cv2.CC_STAT_WIDTH]
+            bh = stats[i, cv2.CC_STAT_HEIGHT]
+
+            mask = (labels == i).astype(np.float32)
+            area_ratio = area / (h * w)
+
+            obj_id = f"obj_{len(candidates)+1:03d}"
+            # MVP: 제너릭 이름 사용. Phase 2에서 naming_utils.suggest_name()으로 교체.
+            # 최종 파일명: "{id}_{name}.png" 형식 (네이밍 규칙 §13 참고)
+            obj_name = f"object_{len(candidates)+1:02d}"
+
+            candidates.append(ObjectCandidate(
+                id=obj_id,
+                name=obj_name,
+                bbox=[x, y, x + bw, y + bh],
+                mask=mask,
+                score=float(saliency_map[labels == i].mean()) / 255.0,
+                area_ratio=area_ratio,
+            ))
+
+            if len(candidates) >= max_objects:
+                break
+
+        return candidates
