@@ -3,8 +3,8 @@ import json
 import torch
 import numpy as np
 from datetime import datetime
-from data.types import ObjectCandidate, PartCandidate
-from utils.export_utils import save_layer_pngs, save_metadata_json, build_metadata
+from ..data.types import ObjectCandidate, PartCandidate
+from ..utils.export_utils import save_layer_pngs, save_metadata_json, build_metadata
 
 
 class BGExportPSDNode:

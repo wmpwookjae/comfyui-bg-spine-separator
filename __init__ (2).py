@@ -1,0 +1,121 @@
+import torch
+from .bg_scene_analyze import BGSceneAnalyzeNode
+from .bg_object_segment import BGObjectSegmentNode
+from .bg_part_split import BGPartSplitNode
+from .bg_hole_fill import BGHoleFillNode
+from .bg_export_psd import BGExportPSDNode
+
+# preset = segmentation_mode 통합 ENUM
+# conservative : 큰 오브젝트(area_ratio≥0.05)만. 과분리 방지 최우선.
+# spine_ready  : 움직일 만한 요소 적극 분리. 일반 배경 씬 기본값.
+# fx_heavy     : 구름/잎/천/장식 같이 작은 애니메이션 요소까지 추출.
+# architecture : 건물/창문/간판 중심 씬.
+PRESET_OPTIONS = ["conservative", "spine_ready", "fx_heavy", "architecture"]
+
+PRESET_PARAMS = {
+    "conservative": {"max_objects": 5,  "min_area_ratio": 0.05, "fill_radius": 10},
+    "spine_ready":  {"max_objects": 10, "min_area_ratio": 0.02, "fill_radius": 15},
+    "fx_heavy":     {"max_objects": 15, "min_area_ratio": 0.01, "fill_radius": 20},
+    "architecture": {"max_objects": 8,  "min_area_ratio": 0.03, "fill_radius": 12},
+}
+
+
+class BackgroundSpineSeparatorNode:
+    """
+    모든 단계를 하나의 노드로 묶은 올인원 wrapper.
+    세부 조정이 필요하면 단계별 노드(BGSceneAnalyze, BGObjectSegment 등)를 직접 사용할 것.
+    """
+
+    CATEGORY = "BG Spine Separator"
+    RETURN_TYPES = ("IMAGE", "IMAGE", "STRING")
+    RETURN_NAMES = ("filled_background", "preview", "export_dir")
+    OUTPUT_NODE = True
+    FUNCTION = "run"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "scene_name": ("STRING", {"default": "bg_scene"}),
+                "preset": (PRESET_OPTIONS, {"default": "spine_ready"}),
+                # preset이 segmentation_mode를 겸함.
+                # 세부 파라미터 조정은 단계별 노드 직접 사용.
+                "segmentation_backend": (
+                    ["simple", "sam", "grounded_sam"], {"default": "simple"}
+                ),
+                "enable_part_split": ("BOOLEAN", {"default": True}),
+                "enable_hole_fill": ("BOOLEAN", {"default": True}),
+                "export_psd": ("BOOLEAN", {"default": False}),
+            },
+            "optional": {
+                "prompt_hint": ("STRING", {"default": ""}),
+                "debug_mode": ("BOOLEAN", {"default": False}),
+            },
+        }
+
+    def run(
+        self,
+        image,
+        scene_name,
+        preset,
+        segmentation_backend,
+        enable_part_split,
+        enable_hole_fill,
+        export_psd,
+        prompt_hint: str = "",
+        debug_mode: bool = False,
+    ):
+        params = PRESET_PARAMS.get(preset, PRESET_PARAMS["spine_ready"])
+
+        # 1. Scene analyze
+        analyze_node = BGSceneAnalyzeNode()
+        (scene_features,) = analyze_node.analyze(image, prompt_hint, debug_mode)
+
+        # 2. Object segment
+        segment_node = BGObjectSegmentNode()
+        candidates, mask_preview = segment_node.segment(
+            image,
+            segmentation_backend,
+            params["max_objects"],
+            params["min_area_ratio"],
+            mask_smoothness=5,
+            scene_features=scene_features,
+            prompt_hint=prompt_hint,
+            debug_mode=debug_mode,
+        )
+
+        # 3. Part split (optional)
+        parts = []
+        if enable_part_split and candidates:
+            split_node = BGPartSplitNode()
+            parts, _ = split_node.split(image, candidates, "auto", True, debug_mode)
+
+        # 4. Hole fill (optional)
+        if enable_hole_fill and candidates:
+            fill_node = BGHoleFillNode()
+            filled_bg, _ = fill_node.fill(
+                image,
+                candidates,
+                "fast",
+                params["fill_radius"],
+                edge_preservation=0.8,
+                debug_mode=debug_mode,
+            )
+        else:
+            filled_bg = image
+
+        # 5. Export
+        export_node = BGExportPSDNode()
+        export_dir, _ = export_node.export(
+            image,
+            filled_bg,
+            candidates,
+            scene_name,
+            export_psd,
+            export_json=True,
+            export_layer_pngs=True,
+            part_candidates=parts if parts else None,
+        )
+
+        return (filled_bg, mask_preview, export_dir)
