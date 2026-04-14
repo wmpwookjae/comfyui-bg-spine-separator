@@ -1,0 +1,44 @@
+import cv2
+import numpy as np
+
+
+def smooth_mask(mask: np.ndarray, kernel_size: int = 5) -> np.ndarray:
+    """가우시안 블러로 마스크 경계 부드럽게."""
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+    blurred = cv2.GaussianBlur(mask, (kernel_size, kernel_size), 0)
+    return np.clip(blurred, 0, 1)
+
+
+def remove_small_components(mask: np.ndarray, min_size: int = 500) -> np.ndarray:
+    """작은 노이즈 컴포넌트 제거."""
+    binary = (mask > 0.5).astype(np.uint8)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary)
+    cleaned = np.zeros_like(binary)
+    for i in range(1, num_labels):
+        if stats[i, cv2.CC_STAT_AREA] >= min_size:
+            cleaned[labels == i] = 1
+    return cleaned.astype(np.float32)
+
+
+def merge_overlapping_masks(masks: list, iou_threshold: float = 0.5) -> list:
+    """
+    IoU가 높은 마스크 병합.
+    TODO: Phase 2 — IoU 계산 후 overlap 높은 것 merge (F1 과분리 대응)
+    """
+    return masks
+
+
+def mask_to_rgba(image_rgb: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """이미지 + 마스크 → RGBA."""
+    alpha = (mask * 255).astype(np.uint8)
+    return np.dstack([image_rgb, alpha])
+
+
+def compute_iou(mask_a: np.ndarray, mask_b: np.ndarray) -> float:
+    """두 마스크의 IoU 계산."""
+    inter = np.logical_and(mask_a > 0.5, mask_b > 0.5).sum()
+    union = np.logical_or(mask_a > 0.5, mask_b > 0.5).sum()
+    if union == 0:
+        return 0.0
+    return float(inter) / float(union)

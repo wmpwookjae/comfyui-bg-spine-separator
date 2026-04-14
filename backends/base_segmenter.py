@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import List
 import numpy as np
-from data.types import ObjectCandidate
+from ..data.types import ObjectCandidate
 
 
 class BaseSegmenter(ABC):
@@ -33,7 +33,7 @@ class BaseSegmenter(ABC):
         """
         마스크 정제. 기본 구현 제공 (각 백엔드에서 override 가능).
         """
-        from utils.mask_utils import smooth_mask, remove_small_components
+        from ..utils.mask_utils import smooth_mask, remove_small_components
         mask = smooth_mask(mask, kernel_size=5)
         mask = remove_small_components(mask, min_size=500)
         return mask
